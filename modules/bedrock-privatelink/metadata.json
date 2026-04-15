@@ -1,0 +1,52 @@
+{
+  "id": "bedrock-privatelink",
+  "version": "1.0.0",
+  "layer": "organization",
+  "description": "VPC Interface Endpoints (PrivateLink) for Amazon Bedrock Runtime, Bedrock control plane, CloudWatch Metrics, CloudWatch Logs, and STS. Enables zero-egress AI operations inside a private VPC.",
+  "capabilities": [
+    "Creates VPC Interface Endpoint for Bedrock Runtime (InvokeModel)",
+    "Creates VPC Interface Endpoint for Bedrock control plane",
+    "Optionally creates VPC Interface Endpoint for Bedrock Agent Runtime",
+    "Creates VPC Interface Endpoint for CloudWatch Metrics",
+    "Creates VPC Interface Endpoint for CloudWatch Logs",
+    "Creates VPC Interface Endpoint for STS (IAM role assumption)",
+    "Creates a shared Security Group controlling access to all endpoints",
+    "Enables private DNS on all endpoints — no SDK code changes required",
+    "Resolves AWS region automatically — no hardcoded region names"
+  ],
+  "requires": ["networking"],
+  "optional": [],
+  "inputs_required": [
+    "project_name",
+    "vpc_id",
+    "subnet_ids",
+    "allowed_sg_ids"
+  ],
+  "inputs_optional": [
+    "enable_bedrock_agent (default: false)",
+    "tags (default: {})"
+  ],
+  "outputs": [
+    "endpoint_sg_id",
+    "bedrock_runtime_endpoint_id",
+    "bedrock_endpoint_id",
+    "bedrock_agent_runtime_endpoint_id",
+    "cloudwatch_endpoint_id",
+    "cloudwatch_logs_endpoint_id",
+    "sts_endpoint_id"
+  ],
+  "llm_hints": [
+    "Pass module.networking.subnet_private_ids to subnet_ids — never public subnets",
+    "Pass [module.networking.sg_app_id] to allowed_sg_ids to allow the MCP Server to reach endpoints",
+    "private_dns_enabled is true on all endpoints — Bedrock SDK calls work without any code changes",
+    "Region is auto-resolved — never pass a region variable to this module",
+    "Set enable_bedrock_agent=true only if using Bedrock Agents API, not for direct InvokeModel calls",
+    "This module must be applied before the MCP Server ECS task — the task needs endpoints to be available"
+  ],
+  "security_notes": [
+    "All endpoints share one Security Group — ingress port 443 restricted to allowed_sg_ids only",
+    "Egress on the endpoint SG is open (required for endpoint ENI health checks) — tfsec ignore applied",
+    "private_dns_enabled prevents DNS-based exfiltration to public Bedrock endpoints",
+    "No resource outside allowed_sg_ids can reach Bedrock or CloudWatch through these endpoints"
+  ]
+}
