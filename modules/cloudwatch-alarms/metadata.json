@@ -1,0 +1,57 @@
+{
+  "id": "cloudwatch-alarms",
+  "version": "1.0.0",
+  "layer": "organization",
+  "description": "CloudWatch Alarms, SNS topic, and EventBridge rule that act as the detection layer for the sovereign-aiops agent. Fires on OOMKilled, high latency, 5XX error rate, and ECS CPU overload. Routes events to the MCP Server for autonomous remediation.",
+  "capabilities": [
+    "Creates SNS topic as central notification channel for all alarms",
+    "Creates OOMKilled alarm for EKS pods (conditional on eks_cluster_name)",
+    "Creates ALB p99 latency alarm (conditional on alb_arn_suffix)",
+    "Creates ALB 5XX error rate alarm using metric math (conditional on alb_arn_suffix)",
+    "Creates ECS CPU overload alarm for the MCP Server (conditional on ecs_cluster_name)",
+    "Creates EventBridge rule routing ALARM state changes to the MCP Server",
+    "Transforms EventBridge events into structured JSON payload before delivery",
+    "Optionally subscribes an email address to the SNS topic"
+  ],
+  "requires": [],
+  "optional": ["eks-cluster", "ecs-fargate"],
+  "inputs_required": ["project_name"],
+  "inputs_optional": [
+    "alb_arn_suffix (default: empty — ALB alarms disabled)",
+    "eks_cluster_name (default: empty — OOMKilled alarm disabled)",
+    "ecs_cluster_name (default: empty — ECS CPU alarm disabled)",
+    "ecs_service_name (default: empty — ECS CPU alarm disabled)",
+    "latency_threshold_seconds (default: 2)",
+    "error_rate_threshold_percent (default: 5)",
+    "cpu_threshold_percent (default: 85)",
+    "eval_periods (default: 2)",
+    "period_seconds (default: 300)",
+    "alarm_email (default: empty — no email subscription)",
+    "mcp_server_lambda_arn (default: empty — EventBridge target disabled)",
+    "tags (default: {})"
+  ],
+  "outputs": [
+    "sns_topic_arn",
+    "sns_topic_name",
+    "eventbridge_rule_arn",
+    "eventbridge_rule_name",
+    "alarm_oomkilled_arn",
+    "alarm_high_latency_arn",
+    "alarm_error_rate_arn",
+    "alarm_ecs_cpu_arn"
+  ],
+  "llm_hints": [
+    "No VPC dependency — CloudWatch, SNS, EventBridge are global services",
+    "All alarms are conditional — pass only the inputs available at the time",
+    "alb_arn_suffix format is app/name/id — get it from module.ecs_fargate outputs",
+    "EventBridge target is disabled if mcp_server_lambda_arn is empty — useful for initial deploy before MCP Server exists",
+    "OOMKilled metric requires kube-state-metrics installed in the EKS cluster (ContainerInsights namespace)",
+    "sns_topic_arn output should also be passed to the Lambda HITL notifier as its publish target"
+  ],
+  "security_notes": [
+    "SNS topic encrypted with aws/sns managed key",
+    "EventBridge rule only routes alarms with this project's name prefix — no cross-project noise",
+    "alarm_actions and ok_actions both point to SNS — operator notified on recovery too",
+    "treat_missing_data=notBreaching prevents false alarms when metrics are not yet available"
+  ]
+}
