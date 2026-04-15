@@ -1,0 +1,49 @@
+{
+  "id": "cloudtrail-audit",
+  "version": "1.0.0",
+  "layer": "organization",
+  "description": "Immutable audit trail for agent actions. CloudTrail multi-region trail with S3 WORM (Object Lock), KMS encryption, and optional CloudWatch Logs streaming. The agent cannot delete or modify its own audit log.",
+  "capabilities": [
+    "Creates CloudTrail multi-region trail capturing all management and S3 data events",
+    "Creates S3 bucket with Object Lock GOVERNANCE mode — logs immutable for retention_days",
+    "Creates dedicated KMS key for CloudTrail encryption — agent role excluded from key policy",
+    "Enforces DenyDeleteObject bucket policy — no principal can delete logs",
+    "Enables CloudTrail log file validation — detects tampering via digital signatures",
+    "Optionally streams events to CloudWatch Log Group for real-time alerting",
+    "Denies non-TLS access to the S3 bucket"
+  ],
+  "requires": [],
+  "optional": [],
+  "inputs_required": ["project_name"],
+  "inputs_optional": [
+    "retention_days (default: 90)",
+    "enable_cloudwatch_logs (default: true)",
+    "cloudwatch_log_retention_days (default: 30)",
+    "tags (default: {})"
+  ],
+  "outputs": [
+    "trail_arn",
+    "trail_name",
+    "s3_bucket_id",
+    "s3_bucket_arn",
+    "kms_key_arn",
+    "kms_key_id",
+    "cloudwatch_log_group_name",
+    "cloudwatch_log_group_arn"
+  ],
+  "llm_hints": [
+    "This module has NO VPC dependency — CloudTrail is a global service, no vpc_id needed",
+    "S3 bucket name includes account_id automatically — no need to make it unique in variables",
+    "force_destroy=false is intentional — terraform destroy will fail if logs exist in the bucket",
+    "To read logs, grant kms:Decrypt on the kms_key_arn output to the reader role",
+    "For stricter compliance than GOVERNANCE mode, change Object Lock to COMPLIANCE mode — cannot be bypassed by anyone",
+    "cloudwatch_log_group_name output can be used to create CloudWatch Metric Filters for alerting on specific agent actions"
+  ],
+  "security_notes": [
+    "Object Lock GOVERNANCE mode prevents deletion during retention period",
+    "DenyDeleteObject bucket policy is an explicit deny — overrides any allow on any role",
+    "KMS key policy grants GenerateDataKey to CloudTrail service only — agent cannot decrypt logs",
+    "enable_log_file_validation detects if log files are modified or deleted after delivery",
+    "Multi-region trail captures API calls in all regions — agent cannot evade by switching regions"
+  ]
+}
