@@ -32,3 +32,13 @@ output "bedrock_endpoint_sg_id" {
   description = "Security Group ID attached to the Bedrock/CW/STS VPC Interface Endpoints."
   value       = module.bedrock_privatelink.endpoint_sg_id
 }
+
+output "hitl_approve_url" {
+  description = "Public URL template for operator approval. Replace INCIDENT_ID and TOKEN."
+  value       = module.hitl_notifier.approve_url_template
+}
+
+output "hitl_api_base_url" {
+  description = "API Gateway base URL for HITL approve/reject endpoints."
+  value       = module.hitl_notifier.api_base_url
+}

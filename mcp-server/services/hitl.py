@@ -21,30 +21,57 @@ class HITLService:
 
     def notify_operator(self, incident_id: str, proposal: dict) -> None:
         """
-        Publishes the fix proposal to SNS so the operator receives it via
-        email/Slack. The notification includes the pre-generated approval token.
+        Publishes the fix proposal to SNS.
+        SNS Email subscription delivers the message directly to the operator.
+        Message is formatted as readable plain text — no SES or HTML required.
         """
         token = self.generate_token(incident_id)
-        message = {
-            "incident_id": incident_id,
-            "root_cause": proposal.get("root_cause"),
-            "fix_description": proposal.get("fix_description"),
-            "risk": proposal.get("risk"),
-            "expected_outcome": proposal.get("expected_outcome"),
-            "actions": proposal.get("actions", []),
-            "approval_token": token,
-            "token_expires_in": "15 minutes",
-            "instructions": (
-                "To approve, call POST /approve with "
-                '{"incident_id": "<id>", "token": "<token>", "approved_by": "<name>"}'
-            ),
-        }
+        api_base = os.environ.get("API_BASE_URL", "").rstrip("/")
+
+        approve_url = f"{api_base}/approve?incident_id={incident_id}&token={token}&approved_by=operator"
+        reject_url  = f"{api_base}/reject?incident_id={incident_id}&rejected_by=operator"
+
+        actions_text = self._format_actions(proposal.get("actions", []))
+
+        message = (
+            f"sovereign-aiops — APPROVAL REQUIRED\n"
+            f"{'=' * 50}\n\n"
+            f"Incident ID : {incident_id}\n"
+            f"Risk        : {proposal.get('risk', 'unknown').upper()}\n\n"
+            f"ROOT CAUSE\n{proposal.get('root_cause')}\n\n"
+            f"PROPOSED FIX\n{proposal.get('fix_description')}\n\n"
+            f"{actions_text}"
+            f"EXPECTED OUTCOME\n{proposal.get('expected_outcome')}\n\n"
+            f"{'=' * 50}\n"
+            f"Token expires in 15 minutes.\n\n"
+            f"APPROVE: {approve_url}\n\n"
+            f"REJECT : {reject_url}\n"
+        )
+
         self.sns.publish(
             TopicArn=self.sns_topic_arn,
-            Subject=f"[sovereign-aiops] APPROVAL REQUIRED — {incident_id}",
-            Message=json.dumps(message, indent=2),
+            Subject=f"[sovereign-aiops] APPROVAL REQUIRED — {incident_id} [{proposal.get('risk','?').upper()}]",
+            Message=message,
         )
         logger.info("hitl_notification_sent incident_id=%s", incident_id)
+
+    def _format_actions(self, actions: list) -> str:
+        if not actions:
+            return ""
+        lines = ["ACTIONS TO EXECUTE"]
+        for i, a in enumerate(actions, 1):
+            action_type = a.get("type", "unknown").upper()
+            if a.get("command"):
+                lines.append(f"  {i}. [{action_type}] {a['command']}")
+            elif a.get("description"):
+                lines.append(f"  {i}. [{action_type}] {a['description']}")
+            elif a.get("document"):
+                lines.append(f"  {i}. [{action_type}] SSM: {a['document']}")
+            elif a.get("diff"):
+                lines.append(f"  {i}. [{action_type}] terraform diff (see logs)")
+            else:
+                lines.append(f"  {i}. [{action_type}]")
+        return "\n".join(lines) + "\n\n"
 
     def generate_token(self, incident_id: str) -> str:
         """

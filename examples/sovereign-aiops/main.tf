@@ -96,8 +96,21 @@ module "ecs_fargate" {
 }
 
 # ------------------------------------------------------------
-# 7. CloudWatch alarms — OOMKilled, latency, error rate, CPU
-#    Depends on: ecs_fargate (for cluster/service/alb names)
+# 7. HITL Notifier — Lambda + API Gateway + SNS Email subscription
+#    Depends on: cloudwatch_alarms (sns_topic_arn), ecs_fargate (alb url)
+# ------------------------------------------------------------
+module "hitl_notifier" {
+  source = "../../lambda/hitl-notifier"
+
+  project_name   = var.project_name
+  sns_topic_arn  = module.cloudwatch_alarms.sns_topic_arn
+  mcp_server_url = "http://${module.ecs_fargate.alb_dns_name}"
+  operator_email = var.operator_email
+}
+
+# ------------------------------------------------------------
+# 8. CloudWatch alarms — any alarm type triggers the flow
+#    Depends on: ecs_fargate, hitl_notifier
 # ------------------------------------------------------------
 module "cloudwatch_alarms" {
   source = "../../modules/cloudwatch-alarms"
@@ -108,6 +121,6 @@ module "cloudwatch_alarms" {
   alb_arn_suffix   = module.ecs_fargate.alb_arn_suffix
   alarm_email      = var.operator_email
 
-  # EventBridge routes alarm events to the MCP Server ECS task via this ARN.
-  mcp_server_lambda_arn = module.ecs_fargate.service_arn
+  # EventBridge routes alarm state changes to the HITL Lambda.
+  mcp_server_lambda_arn = module.hitl_notifier.lambda_arn
 }

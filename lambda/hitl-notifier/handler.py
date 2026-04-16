@@ -1,13 +1,14 @@
 """
-Lambda HITL Notifier — two responsibilities:
+Lambda HITL Notifier — API Gateway trigger only.
 
-1. SNS trigger (source: aws:sns)
-   Receives the incident notification from the MCP Server, formats it,
-   and delivers it to the operator via email and/or Slack.
+SNS delivers the incident notification directly to the operator via Email subscription.
+This Lambda only handles the operator's APPROVE / REJECT decision:
 
-2. API Gateway trigger (source: API GW — GET /approve or /reject)
-   Receives the operator decision (click from email/Slack),
-   validates basic params, and forwards to the MCP Server /approve or /reject endpoint.
+  GET /approve?incident_id=&token=&approved_by=
+  GET /reject?incident_id=&rejected_by=
+
+It validates the params and forwards the decision to the MCP Server internal endpoint.
+The operator sees a plain HTML confirmation page in their browser after clicking.
 """
 
 import json
@@ -16,105 +17,75 @@ import os
 import urllib.request
 import urllib.parse
 
-from formatter import email_html, slack_blocks
-
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-MCP_SERVER_URL = os.environ["MCP_SERVER_URL"]        # internal ALB URL of the MCP Server
-SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")   # optional
-API_BASE_URL = os.environ["API_BASE_URL"]            # public URL of this API Gateway
+MCP_SERVER_URL = os.environ["MCP_SERVER_URL"]   # internal ALB URL — no public access
 
 
 def lambda_handler(event, context):
-    # Determine trigger source
-    if "Records" in event and event["Records"][0].get("EventSource") == "aws:sns":
-        return _handle_sns(event)
-
-    # API Gateway — operator clicking APPROVE or REJECT
-    if "queryStringParameters" in event:
-        return _handle_api_gw(event)
-
-    logger.warning("unrecognized_event_source keys=%s", list(event.keys()))
-    return {"statusCode": 400, "body": "Unrecognized event source"}
-
-
-# ------------------------------------------------------------------
-# Trigger 1: SNS — deliver notification to operator
-# ------------------------------------------------------------------
-
-def _handle_sns(event: dict) -> dict:
-    for record in event["Records"]:
-        raw = record["Sns"]["Message"]
-        try:
-            incident = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.error("sns_message_not_json message=%s", raw[:200])
-            continue
-
-        incident_id = incident.get("incident_id", "unknown")
-        token = incident.get("approval_token", "")
-
-        approve_url = (
-            f"{API_BASE_URL}/approve?"
-            f"incident_id={urllib.parse.quote(incident_id)}&"
-            f"token={urllib.parse.quote(token)}&"
-            f"approved_by=operator"
-        )
-        reject_url = (
-            f"{API_BASE_URL}/reject?"
-            f"incident_id={urllib.parse.quote(incident_id)}&"
-            f"rejected_by=operator"
-        )
-
-        logger.info("hitl_notification incident_id=%s risk=%s", incident_id, incident.get("risk"))
-
-        if SLACK_WEBHOOK_URL:
-            _send_slack(incident, approve_url, reject_url)
-
-        # Email is handled by the SNS email subscription configured in Terraform.
-        # The SNS message already contains the full formatted text — no extra call needed.
-        # Slack is an additional channel if SLACK_WEBHOOK_URL is set.
-
-    return {"statusCode": 200}
-
-
-# ------------------------------------------------------------------
-# Trigger 2: API Gateway — forward operator decision to MCP Server
-# ------------------------------------------------------------------
-
-def _handle_api_gw(event: dict) -> dict:
-    path = event.get("path", event.get("rawPath", ""))
+    path   = event.get("path") or event.get("rawPath", "")
     params = event.get("queryStringParameters") or {}
 
-    incident_id = params.get("incident_id", "")
-    if not incident_id:
-        return _response(400, {"error": "incident_id is required"})
+    logger.info("hitl_request path=%s params=%s", path, list(params.keys()))
 
     if path.endswith("/approve"):
-        token = params.get("token", "")
-        approved_by = params.get("approved_by", "operator")
-        if not token:
-            return _response(400, {"error": "token is required"})
-
-        result = _call_mcp("POST", "/approve", {
-            "incident_id": incident_id,
-            "token": token,
-            "approved_by": approved_by,
-        })
-        logger.info("approval_forwarded incident_id=%s status=%s", incident_id, result.get("status"))
-        return _response(200, {"message": "Approval submitted.", "result": result})
+        return _approve(params)
 
     if path.endswith("/reject"):
-        rejected_by = params.get("rejected_by", "operator")
-        result = _call_mcp("POST", "/reject", {
-            "incident_id": incident_id,
-            "rejected_by": rejected_by,
-        })
-        logger.info("rejection_forwarded incident_id=%s", incident_id)
-        return _response(200, {"message": "Fix rejected.", "result": result})
+        return _reject(params)
 
-    return _response(404, {"error": f"Unknown path: {path}"})
+    return _page(404, "Not found", "Unknown path.")
+
+
+# ------------------------------------------------------------------
+# Handlers
+# ------------------------------------------------------------------
+
+def _approve(params: dict) -> dict:
+    incident_id = params.get("incident_id", "").strip()
+    token       = params.get("token", "").strip()
+    approved_by = params.get("approved_by", "operator").strip()
+
+    if not incident_id or not token:
+        return _page(400, "Bad request", "Missing incident_id or token.")
+
+    result = _call_mcp("POST", "/approve", {
+        "incident_id": incident_id,
+        "token": token,
+        "approved_by": approved_by,
+    })
+
+    if "error" in result:
+        logger.error("approve_failed incident_id=%s error=%s", incident_id, result["error"])
+        return _page(502, "Error", f"Could not reach MCP Server: {result['error']}")
+
+    status = result.get("status", "unknown")
+    if status == "rejected":
+        return _page(403, "Token rejected", "The approval token is invalid or expired. Request a new approval.")
+
+    logger.info("approved incident_id=%s approved_by=%s", incident_id, approved_by)
+    return _page(200, "Approved", f"Fix approved for incident <strong>{incident_id}</strong>. Execution started.")
+
+
+def _reject(params: dict) -> dict:
+    incident_id = params.get("incident_id", "").strip()
+    rejected_by = params.get("rejected_by", "operator").strip()
+
+    if not incident_id:
+        return _page(400, "Bad request", "Missing incident_id.")
+
+    result = _call_mcp("POST", "/reject", {
+        "incident_id": incident_id,
+        "rejected_by": rejected_by,
+    })
+
+    if "error" in result:
+        logger.error("reject_failed incident_id=%s error=%s", incident_id, result["error"])
+        return _page(502, "Error", f"Could not reach MCP Server: {result['error']}")
+
+    logger.info("rejected incident_id=%s rejected_by=%s", incident_id, rejected_by)
+    return _page(200, "Rejected", f"Fix rejected for incident <strong>{incident_id}</strong>. No changes applied.")
 
 
 # ------------------------------------------------------------------
@@ -122,12 +93,10 @@ def _handle_api_gw(event: dict) -> dict:
 # ------------------------------------------------------------------
 
 def _call_mcp(method: str, path: str, payload: dict) -> dict:
-    url = MCP_SERVER_URL.rstrip("/") + path
+    url  = MCP_SERVER_URL.rstrip("/") + path
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
+    req  = urllib.request.Request(
+        url, data=data, method=method,
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -138,25 +107,19 @@ def _call_mcp(method: str, path: str, payload: dict) -> dict:
         return {"error": str(exc)}
 
 
-def _send_slack(incident: dict, approve_url: str, reject_url: str) -> None:
-    payload = slack_blocks(incident, approve_url, reject_url)
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        SLACK_WEBHOOK_URL,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        urllib.request.urlopen(req, timeout=10)
-        logger.info("slack_notification_sent incident_id=%s", incident.get("incident_id"))
-    except Exception as exc:
-        logger.warning("slack_notification_failed error=%s", exc)
-
-
-def _response(status: int, body: dict) -> dict:
+def _page(status: int, title: str, body: str) -> dict:
+    """Returns a minimal HTML page shown to the operator in the browser after clicking."""
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>sovereign-aiops — {title}</title></head>
+<body style="font-family:Arial,sans-serif;max-width:480px;margin:80px auto;text-align:center;">
+  <h2>{title}</h2>
+  <p>{body}</p>
+  <p style="color:#888;font-size:12px;margin-top:40px;">sovereign-aiops HITL</p>
+</body>
+</html>"""
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
+        "headers": {"Content-Type": "text/html"},
+        "body": html,
     }
