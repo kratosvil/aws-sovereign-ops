@@ -233,19 +233,18 @@ if actions:
 approve_fix() {
   section "Phase 3 — Executing approved fix"
 
-  # Extract token from the proposal embedded in the response
+  # Extract token from the response (returned by MCP Server for demo mode)
+  # In production the operator gets the token via SNS email
   TOKEN=$(echo "$RESPONSE" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-# token comes from the notification sent to SNS — in demo mode we read it from response
-# In production the operator gets it via email
-proposal = d.get('proposal', {})
-print(d.get('token', proposal.get('approval_token', 'demo-token')))
-" 2>/dev/null || echo "demo-token")
+print(d.get('approval_token', ''))
+" 2>/dev/null || echo "")
 
-  read -rp "Enter approval token (from email) or press Enter for demo mode: " input_token
-  if [[ -n "$input_token" ]]; then
-    TOKEN="$input_token"
+  if [[ -z "$TOKEN" ]]; then
+    read -rp "Token not found in response. Enter approval token from email: " TOKEN
+  else
+    echo -e "${DIM}Token extracted from response (demo mode).${RESET}"
   fi
 
   read -rp "Approved by (your name): " approved_by

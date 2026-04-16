@@ -99,6 +99,9 @@ class ProposeFixTool:
 
         action_types = [a.get("type") for a in proposal["actions"]]
         logger.info("fix_proposed risk=%s actions=%s", risk, action_types)
+        logger.info("fix_detail root_cause=%s", root_cause)
+        for i, a in enumerate(proposal["actions"], 1):
+            logger.info("action_%d type=%s detail=%s", i, a.get("type"), a.get("command") or a.get("description") or a.get("document", ""))
 
         return {
             "status": "proposal_recorded",

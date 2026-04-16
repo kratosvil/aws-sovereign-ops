@@ -29,7 +29,7 @@ destroy-example:
 	cd examples/sovereign-aiops && terraform destroy -auto-approve
 
 mcp-install:
-	cd mcp-server && pip install -r requirements.txt
+	cd mcp-server && pip3 install -r requirements.txt
 
 mcp-run:
-	cd mcp-server && python server.py
+	cd mcp-server && python3 server.py

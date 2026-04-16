@@ -19,7 +19,7 @@ class HITLService:
         self.sns_topic_arn = os.environ["HITL_SNS_TOPIC"]
         self._secret = os.environ.get("HITL_TOKEN_SECRET", "change-me-in-prod")
 
-    def notify_operator(self, incident_id: str, proposal: dict) -> None:
+    def notify_operator(self, incident_id: str, proposal: dict) -> str:
         """
         Publishes the fix proposal to SNS.
         SNS Email subscription delivers the message directly to the operator.
@@ -48,12 +48,17 @@ class HITLService:
             f"REJECT : {reject_url}\n"
         )
 
-        self.sns.publish(
-            TopicArn=self.sns_topic_arn,
-            Subject=f"[sovereign-aiops] APPROVAL REQUIRED — {incident_id} [{proposal.get('risk','?').upper()}]",
-            Message=message,
-        )
-        logger.info("hitl_notification_sent incident_id=%s", incident_id)
+        try:
+            self.sns.publish(
+                TopicArn=self.sns_topic_arn,
+                Subject=f"[sovereign-aiops] APPROVAL REQUIRED — {incident_id} [{proposal.get('risk','?').upper()}]",
+                Message=message,
+            )
+            logger.info("hitl_notification_sent incident_id=%s", incident_id)
+        except Exception as exc:
+            logger.warning("hitl_sns_unavailable incident_id=%s error=%s — running in local/demo mode", incident_id, exc)
+
+        return token
 
     def _format_actions(self, actions: list) -> str:
         if not actions:

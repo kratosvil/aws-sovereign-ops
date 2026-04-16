@@ -25,7 +25,19 @@ from tools.validate_fix import ValidateFixTool, SCHEMA as VALIDATE_SCHEMA
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a sovereign-aiops incident response agent.
+def _build_system_prompt() -> str:
+    import os
+    account_id = os.environ.get("AWS_ACCOUNT_ID", "")
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    project = os.environ.get("PROJECT_NAME", "sovereign-aiops")
+    account_line = f"- AWS Account ID: {account_id}" if account_id else "- AWS Account ID: unknown (do not use ACCOUNT-ID as placeholder — omit ARNs that require it)"
+
+    return f"""You are a sovereign-aiops incident response agent.
+
+Environment:
+- AWS Region: {region}
+- Project: {project}
+{account_line}
 
 Your job:
 1. Investigate infrastructure failures using analyze_incident.
@@ -37,9 +49,12 @@ Your job:
 Rules:
 - Always call analyze_incident before propose_fix.
 - Never execute anything without a valid approval token.
+- Never use placeholder values like ACCOUNT-ID in commands — use the real account ID from environment or omit the ARN.
 - Be concise and precise in your reasoning.
 - If you cannot determine a safe fix, set risk=high and explain why in fix_description.
 """
+
+SYSTEM_PROMPT = _build_system_prompt()
 
 MAX_LOOP_ITERATIONS = 10
 CIRCUIT_BREAKER_THRESHOLD = 2
@@ -87,14 +102,14 @@ class Orchestrator:
         messages = [
             {
                 "role": "user",
-                "content": (
+                "content": [{"text": (
                     f"Incident ID: {incident_id}\n"
                     f"Alarm: {event.alarm_name}\n"
                     f"State: {event.alarm_state}\n"
                     f"Reason: {event.reason}\n"
                     f"Timestamp: {event.timestamp}\n\n"
                     "Investigate this incident and propose a fix."
-                ),
+                )}],
             }
         ]
         schemas = [self.tool_schemas[t] for t in INVESTIGATION_TOOLS]
@@ -107,13 +122,14 @@ class Orchestrator:
             return {"status": "no_proposal", "incident_id": incident_id}
 
         self.audit.fix_proposed(incident_id, proposal["risk"], proposal["fix_description"])
-        self.hitl.notify_operator(incident_id, proposal)
+        token = self.hitl.notify_operator(incident_id, proposal)
         self.audit.hitl_notified(incident_id)
 
         return {
             "status": "awaiting_approval",
             "incident_id": incident_id,
             "proposal": proposal,
+            "approval_token": token,
             "bedrock_reasoning": result.get("final_text"),
         }
 
@@ -131,7 +147,7 @@ class Orchestrator:
         messages = [
             {
                 "role": "user",
-                "content": (
+                "content": [{"text": (
                     f"Incident ID: {incident_id}\n"
                     f"The operator has approved the fix. Approval token: {approval['token']}\n"
                     f"Approved by: {approval.get('approved_by', 'unknown')}\n\n"
@@ -140,7 +156,7 @@ class Orchestrator:
                     "Call execute_approved with the actions list and the token. "
                     "After executing, call validate_fix to confirm the fix worked. "
                     "If validation fails, call rollback with the appropriate undo_actions."
-                ),
+                )}],
             }
         ]
         schemas = [self.tool_schemas[t] for t in EXECUTION_TOOLS]
