@@ -212,28 +212,60 @@ Layer 6 — Circuit:    2 consecutive failures → agent suspends + escalates to
 
 ## Prerequisites
 
-- AWS CLI configured (`aws configure`)
-- Terraform >= 1.5
-- Python >= 3.11
-- Docker (for MCP Server image)
-- Amazon Bedrock model access enabled: `anthropic.claude-3-haiku` in your AWS account
+Install these tools before cloning the repo.
+
+| Tool | Version | Install |
+|------|---------|---------|
+| `make` | any | **macOS:** `xcode-select --install` · **Ubuntu/Debian:** `sudo apt install make` · **Windows:** [GnuWin32](https://gnuwin32.sourceforge.net/packages/make.htm) |
+| `python3` | >= 3.11 | **macOS:** `brew install python@3.11` · **Ubuntu:** `sudo apt install python3.11` · **Windows:** [python.org](https://www.python.org/downloads/) |
+| `pip` | any | included with Python 3.11+ |
+| `terraform` | >= 1.5 | [developer.hashicorp.com/terraform/install](https://developer.hashicorp.com/terraform/install) |
+| `aws cli` | v2 | [docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) |
+
+**AWS requirements:**
+- AWS CLI configured: `aws configure`
+- Amazon Bedrock model access enabled: `anthropic.claude-3-haiku-20240307-v1:0` in your AWS account and region
+
+> Bedrock model access is disabled by default. Enable it at:
+> AWS Console → Amazon Bedrock → Model access → Request access → Claude 3 Haiku
 
 ---
 
 ## Quick Start
 
+All commands run from the **repo root directory** after cloning.
+
 ```bash
-# 1. Deploy infrastructure
+# Clone
+git clone https://github.com/kratosvil/aws-sovereign-ops.git
+cd aws-sovereign-ops
+
+# Install MCP Server dependencies (run once)
+make mcp-install
+
+# Set required environment variables
+export AWS_REGION=us-east-1
+export BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+export HITL_SNS_TOPIC=arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:sovereign-aiops-alarms
+export HITL_TOKEN_SECRET=your-secret-key
+export API_BASE_URL=https://YOUR_API_GW_ID.execute-api.us-east-1.amazonaws.com/prod
+export PROJECT_NAME=sovereign-aiops
+
+# Start MCP Server (terminal 1)
+make mcp-run
+
+# Run the demo (terminal 2 — repo root)
+bash scripts/demo.sh
+```
+
+**To deploy the full AWS infrastructure:**
+
+```bash
+# Deploy (repo root)
 make init-example
 make apply-example
 
-# 2. Install MCP Server dependencies
-make mcp-install
-
-# 3. Run the demo — simulates OOMKilled and full remediation loop
-bash scripts/demo.sh
-
-# 4. Destroy after demo
+# Destroy after demo — VPC endpoints charge per hour
 make destroy-example
 ```
 
