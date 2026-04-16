@@ -136,10 +136,10 @@ class Orchestrator:
                     f"The operator has approved the fix. Approval token: {approval['token']}\n"
                     f"Approved by: {approval.get('approved_by', 'unknown')}\n\n"
                     f"Execute the approved fix:\n"
-                    f"- kubectl_commands: {proposal.get('kubectl_commands', [])}\n"
-                    f"- terraform_diff: {'yes' if proposal.get('terraform_diff') else 'none'}\n\n"
-                    "After executing, validate the fix with validate_fix. "
-                    "If validation fails, call rollback."
+                    f"- actions: {proposal.get('actions', [])}\n\n"
+                    "Call execute_approved with the actions list and the token. "
+                    "After executing, call validate_fix to confirm the fix worked. "
+                    "If validation fails, call rollback with the appropriate undo_actions."
                 ),
             }
         ]

@@ -6,9 +6,11 @@ logger = logging.getLogger(__name__)
 SCHEMA = {
     "name": "propose_fix",
     "description": (
-        "Records the diagnosis and fix you have determined from the incident analysis. "
-        "Call this after analyze_incident once you have identified the root cause. "
-        "This does NOT execute anything — it formalizes your proposal for human review."
+        "Records the diagnosis and fix determined from the incident analysis. "
+        "Call this after analyze_incident once the root cause is identified. "
+        "Works for ANY AWS resource: EKS pods, ECS services, RDS, Lambda, ALB, "
+        "DynamoDB, ElastiCache, S3, API Gateway, etc. "
+        "This does NOT execute anything — it formalizes the proposal for human review."
     ),
     "inputSchema": {
         "json": {
@@ -26,23 +28,44 @@ SCHEMA = {
                     "type": "string",
                     "enum": ["low", "medium", "high"],
                     "description": (
-                        "Risk level of the fix. "
-                        "low=config change, medium=rolling restart, high=destructive or irreversible."
+                        "Risk level. "
+                        "low=config/parameter change with no downtime. "
+                        "medium=rolling restart or scaling operation. "
+                        "high=destructive, irreversible, or affects multiple services."
                     ),
                 },
                 "expected_outcome": {
                     "type": "string",
                     "description": "What the system state should look like after the fix succeeds.",
                 },
-                "kubectl_commands": {
+                "actions": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Kubectl commands to execute (in order). Empty if not applicable.",
+                    "description": (
+                        "Ordered list of actions to execute. Each action has a 'type' field. "
+                        "Supported types: "
+                        "'kubectl' (command: str), "
+                        "'terraform' (diff: str), "
+                        "'aws_cli' (command: str — full aws CLI command), "
+                        "'ssm' (document: str, parameters: dict, targets: list), "
+                        "'manual' (description: str — cannot be automated, operator must do it)."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": ["kubectl", "terraform", "aws_cli", "ssm", "manual"],
+                            },
+                            "command": {"type": "string"},
+                            "diff": {"type": "string"},
+                            "document": {"type": "string"},
+                            "parameters": {"type": "object"},
+                            "targets": {"type": "array"},
+                            "description": {"type": "string"},
+                        },
+                        "required": ["type"],
+                    },
                     "default": [],
-                },
-                "terraform_diff": {
-                    "type": "string",
-                    "description": "Terraform HCL diff if infrastructure changes are needed. Null if not applicable.",
                 },
             },
             "required": ["root_cause", "fix_description", "risk", "expected_outcome"],
@@ -50,7 +73,6 @@ SCHEMA = {
     },
 }
 
-# Module-level store — the orchestrator reads this after Bedrock calls propose_fix
 _current_proposal: Optional[dict] = None
 
 
@@ -61,8 +83,7 @@ class ProposeFixTool:
         fix_description: str,
         risk: str,
         expected_outcome: str,
-        kubectl_commands: list = None,
-        terraform_diff: str = None,
+        actions: list = None,
     ) -> dict:
         global _current_proposal
 
@@ -71,17 +92,13 @@ class ProposeFixTool:
             "fix_description": fix_description,
             "risk": risk,
             "expected_outcome": expected_outcome,
-            "kubectl_commands": kubectl_commands or [],
-            "terraform_diff": terraform_diff,
+            "actions": actions or [],
         }
 
         _current_proposal = proposal
 
-        logger.info(
-            "fix_proposed risk=%s fix=%s",
-            risk,
-            fix_description[:80],
-        )
+        action_types = [a.get("type") for a in proposal["actions"]]
+        logger.info("fix_proposed risk=%s actions=%s", risk, action_types)
 
         return {
             "status": "proposal_recorded",
@@ -91,11 +108,9 @@ class ProposeFixTool:
 
 
 def get_current_proposal() -> Optional[dict]:
-    """Called by the orchestrator to retrieve the proposal after Bedrock records it."""
     return _current_proposal
 
 
 def clear_proposal() -> None:
-    """Reset between incidents."""
     global _current_proposal
     _current_proposal = None

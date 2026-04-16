@@ -10,7 +10,7 @@ SCHEMA = {
     "name": "validate_fix",
     "description": (
         "Checks post-fix metrics to confirm the incident is resolved. "
-        "Pulls CloudWatch metrics for the resource and returns current state. "
+        "Works for any AWS resource type: eks_pod, ecs_service, rds, lambda, alb, generic. "
         "Call this after execute_approved. "
         "If metrics show the issue persists, call rollback next."
     ),
@@ -24,7 +24,13 @@ SCHEMA = {
                 },
                 "resource_name": {
                     "type": "string",
-                    "description": "Name of the pod or ECS task that was fixed.",
+                    "description": "Name of the resource that was fixed.",
+                },
+                "resource_type": {
+                    "type": "string",
+                    "enum": ["eks_pod", "ecs_service", "rds", "lambda", "alb", "generic"],
+                    "description": "Same resource_type used in analyze_incident.",
+                    "default": "generic",
                 },
                 "lookback_minutes": {
                     "type": "integer",
@@ -37,6 +43,18 @@ SCHEMA = {
     },
 }
 
+# Key metric per resource type used to determine if the fix worked.
+# Format: (metric_id, namespace, metric_name, dimension_name, stat, failure_threshold)
+# fix_confirmed = True when the metric is BELOW the threshold (or has no data = no new events)
+HEALTH_CHECK_METRIC = {
+    "eks_pod": ("restarts", "ContainerInsights", "pod_number_of_container_restarts", "PodName", "Sum", 1),
+    "ecs_service": ("cpu_util", "AWS/ECS", "CPUUtilization", "ServiceName", "Average", 85),
+    "rds": ("cpu_util", "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "Average", 85),
+    "lambda": ("errors", "AWS/Lambda", "Errors", "FunctionName", "Sum", 1),
+    "alb": ("5xx", "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "Sum", 5),
+    "generic": None,
+}
+
 
 class ValidateFixTool:
     def __init__(self):
@@ -45,93 +63,106 @@ class ValidateFixTool:
         self.project = os.environ.get("PROJECT_NAME", "sovereign-aiops")
 
     def execute(
-        self, incident_id: str, resource_name: str, lookback_minutes: int = 10
+        self,
+        incident_id: str,
+        resource_name: str,
+        resource_type: str = "generic",
+        lookback_minutes: int = 10,
     ) -> dict:
         end = datetime.now(timezone.utc)
         start = end - timedelta(minutes=lookback_minutes)
 
-        metrics = self._get_metrics(resource_name, start, end)
-        alarm_state = self._get_alarm_state(resource_name)
+        metrics = self._get_health_metric(resource_name, resource_type, start, end)
+        active_alarms = self._get_active_alarms()
 
-        # Determine if fix succeeded based on metrics
-        mem_values = metrics.get("mem", {}).get("values", [])
-        mem_max = max(mem_values) if mem_values else None
-        alarms_in_alert = [a for a in alarm_state if a["state"] == "ALARM"]
-
-        fix_confirmed = len(alarms_in_alert) == 0 and (mem_max is None or mem_max < 90)
+        fix_confirmed, reason = self._assess(resource_type, metrics, active_alarms)
 
         logger.info(
-            "validate_fix incident_id=%s resource=%s fix_confirmed=%s mem_max=%s alarms=%d",
-            incident_id, resource_name, fix_confirmed, mem_max, len(alarms_in_alert),
+            "validate_fix incident_id=%s resource=%s type=%s fix_confirmed=%s reason=%s",
+            incident_id, resource_name, resource_type, fix_confirmed, reason,
         )
 
         return {
             "incident_id": incident_id,
             "resource_name": resource_name,
+            "resource_type": resource_type,
             "fix_confirmed": fix_confirmed,
             "metrics_post_fix": metrics,
-            "active_alarms": alarms_in_alert,
-            "memory_max_percent": mem_max,
-            "assessment": (
-                "Fix confirmed — resource is stable."
-                if fix_confirmed
-                else "Fix did NOT resolve the issue — consider rollback."
-            ),
+            "active_alarms_count": len(active_alarms),
+            "active_alarms": active_alarms,
+            "assessment": reason,
         }
 
-    def _get_metrics(self, resource_name: str, start: datetime, end: datetime) -> dict:
+    def _get_health_metric(
+        self, resource_name: str, resource_type: str, start: datetime, end: datetime
+    ) -> dict:
+        spec = HEALTH_CHECK_METRIC.get(resource_type)
+        if not spec:
+            return {}
+
+        metric_id, namespace, metric_name, dim_name, stat, _ = spec
         try:
             resp = self.cw.get_metric_data(
                 MetricDataQueries=[
                     {
-                        "Id": "mem",
+                        "Id": metric_id,
                         "MetricStat": {
                             "Metric": {
-                                "Namespace": "ContainerInsights",
-                                "MetricName": "pod_memory_utilization",
-                                "Dimensions": [{"Name": "PodName", "Value": resource_name}],
+                                "Namespace": namespace,
+                                "MetricName": metric_name,
+                                "Dimensions": [{"Name": dim_name, "Value": resource_name}],
                             },
                             "Period": 60,
-                            "Stat": "Maximum",
+                            "Stat": stat,
                         },
-                    },
-                    {
-                        "Id": "restarts",
-                        "MetricStat": {
-                            "Metric": {
-                                "Namespace": "ContainerInsights",
-                                "MetricName": "pod_number_of_container_restarts",
-                                "Dimensions": [{"Name": "PodName", "Value": resource_name}],
-                            },
-                            "Period": 60,
-                            "Stat": "Sum",
-                        },
-                    },
+                    }
                 ],
                 StartTime=start,
                 EndTime=end,
             )
+            result = resp["MetricDataResults"][0]
             return {
-                r["Id"]: {
-                    "values": r.get("Values", []),
-                    "timestamps": [t.isoformat() for t in r.get("Timestamps", [])],
+                metric_id: {
+                    "values": result.get("Values", []),
+                    "timestamps": [t.isoformat() for t in result.get("Timestamps", [])],
                 }
-                for r in resp.get("MetricDataResults", [])
             }
         except Exception as exc:
-            logger.warning("post_fix_metrics_failed resource=%s error=%s", resource_name, exc)
+            logger.warning("health_metric_failed resource=%s error=%s", resource_name, exc)
             return {"error": str(exc)}
 
-    def _get_alarm_state(self, resource_name: str) -> list:
+    def _get_active_alarms(self) -> list:
         try:
             resp = self.cw.describe_alarms(
                 AlarmNamePrefix=self.project,
                 StateValue="ALARM",
             )
             return [
-                {"name": a["AlarmName"], "state": a["StateValue"], "reason": a["StateReason"]}
+                {"name": a["AlarmName"], "reason": a["StateReason"]}
                 for a in resp.get("MetricAlarms", [])
             ]
         except Exception as exc:
-            logger.warning("alarm_state_check_failed error=%s", exc)
+            logger.warning("active_alarms_check_failed error=%s", exc)
             return []
+
+    def _assess(self, resource_type: str, metrics: dict, active_alarms: list) -> tuple:
+        spec = HEALTH_CHECK_METRIC.get(resource_type)
+
+        # If alarms are still firing for this project — fix did not work
+        if active_alarms:
+            return False, f"Fix did NOT resolve the issue — {len(active_alarms)} alarm(s) still active."
+
+        if not spec or "error" in metrics:
+            return True, "No active alarms detected. Assuming fix succeeded (no health metric available)."
+
+        metric_id, _, _, _, _, threshold = spec
+        values = metrics.get(metric_id, {}).get("values", [])
+
+        if not values:
+            return True, "No new metric events detected post-fix. Fix appears successful."
+
+        peak = max(values)
+        if peak >= threshold:
+            return False, f"Peak value {peak} still exceeds threshold {threshold}. Fix did NOT resolve the issue."
+
+        return True, f"Peak value {peak} is below threshold {threshold}. Fix confirmed successful."

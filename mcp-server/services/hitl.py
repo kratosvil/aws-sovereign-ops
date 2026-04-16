@@ -31,8 +31,7 @@ class HITLService:
             "fix_description": proposal.get("fix_description"),
             "risk": proposal.get("risk"),
             "expected_outcome": proposal.get("expected_outcome"),
-            "kubectl_commands": proposal.get("kubectl_commands", []),
-            "terraform_diff": proposal.get("terraform_diff"),
+            "actions": proposal.get("actions", []),
             "approval_token": token,
             "token_expires_in": "15 minutes",
             "instructions": (
