@@ -136,6 +136,6 @@ Reference via: source = "github.com/kratosvil/tf-modules-forge//modules/X"
 | modules/cloudwatch-alarms | Done |
 | examples/sovereign-aiops | Done |
 | mcp-server/ | Done |
-| lambda/hitl-notifier | Pending |
-| scripts/demo.sh | Pending |
-| docs/architecture.md | Pending |
+| lambda/hitl-notifier | Done |
+| scripts/demo.sh | Done |
+| docs/architecture.md | Done |
