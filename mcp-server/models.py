@@ -18,6 +18,8 @@ class AlarmEvent:
     timestamp: str
     project: str
     raw_event: dict
+    resource_name: str = ""
+    resource_type: str = "generic"
 
 
 @dataclass

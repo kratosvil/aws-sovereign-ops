@@ -200,6 +200,7 @@ resource "aws_cloudwatch_event_target" "mcp_server" {
       alarm_state = "$.detail.state.value"
       reason      = "$.detail.state.reason"
       timestamp   = "$.time"
+      dimensions  = "$.detail.configuration.metrics[0].metricStat.metric.dimensions"
     }
     input_template = <<-EOT
       {
@@ -208,7 +209,8 @@ resource "aws_cloudwatch_event_target" "mcp_server" {
         "alarm_state": "<alarm_state>",
         "reason": "<reason>",
         "timestamp": "<timestamp>",
-        "project": "${var.project_name}"
+        "project": "${var.project_name}",
+        "dimensions": <dimensions>
       }
     EOT
   }

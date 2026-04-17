@@ -136,11 +136,21 @@ Reference via: source = "github.com/kratosvil/tf-modules-forge//modules/X"
 | modules/bedrock-privatelink | Done |
 | modules/cloudtrail-audit | Done |
 | modules/cloudwatch-alarms | Done |
-| examples/sovereign-aiops | Done — deployed to AWS 2026-04-16 |
+| examples/sovereign-aiops | Done — deployed to AWS 2026-04-16/17 |
 | mcp-server/ | Done — image in ECR |
 | lambda/hitl-notifier | Done — deployed to AWS |
 | scripts/demo.sh | Done — 4/4 local tests passed |
 | docs/architecture.md | Done |
+
+## e2e test scenarios validated (v1)
+
+| # | Scenario | Lambda | Fix Applied | Incident |
+|---|----------|--------|-------------|---------|
+| 1 | Lambda timeout | sovereign-aiops-timeout-test | timeout 3s → 60s | eb0a61b5 |
+| 2 | Lambda throttled | sovereign-aiops-throttle-test | delete-function-concurrency | fd5569c2 |
+| 3 | Lambda OOM | sovereign-aiops-oom-test | memory 128MB → 256MB | b87000cc |
+| 4 | Lambda errors | sovereign-aiops-error-test | diagnosis + medium risk | 5125a7c4 |
+| 5 | ECS desired=0 | — | deferred to v2 (SPOF: MCP Server is in same ECS) | — |
 
 ## Live AWS resources (us-east-1, account 805778285334)
 
@@ -149,10 +159,10 @@ Reference via: source = "github.com/kratosvil/tf-modules-forge//modules/X"
 | ECS Cluster | sovereign-aiops-cluster |
 | ECS Service | sovereign-aiops-service |
 | ECR | 805778285334.dkr.ecr.us-east-1.amazonaws.com/sovereign-aiops-mcp-server |
-| HITL API | https://k4avvm6daf.execute-api.us-east-1.amazonaws.com/prod |
+| HITL API | https://788nqj8wtg.execute-api.us-east-1.amazonaws.com/prod |
 | SNS Topic | arn:aws:sns:us-east-1:805778285334:sovereign-aiops-alarms |
 | CloudTrail S3 | sovereign-aiops-cloudtrail-805778285334 |
-| VPC | vpc-0b1179b10818ba7e3 |
+| VPC | vpc-00724a90c9c7bde3c |
 
 ## cloudwatch-alarms module — important inputs
 

@@ -161,6 +161,8 @@ def _parse_alarm_event(body: dict) -> AlarmEvent:
         timestamp=detail.get("state", {}).get("timestamp", detail.get("timestamp", "")),
         project=os.environ.get("PROJECT_NAME", "sovereign-aiops"),
         raw_event=body,
+        resource_name=detail.get("resource_name", ""),
+        resource_type=detail.get("resource_type", "generic"),
     )
 
 

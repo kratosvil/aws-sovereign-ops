@@ -118,7 +118,7 @@ module "ecs_fargate" {
     { name = "CLOUDTRAIL_BUCKET", value = module.cloudtrail_audit.s3_bucket_id },
     { name = "BEDROCK_MODEL_ID",  value = "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
     { name = "HITL_TOKEN_SECRET", value = var.hitl_token_secret },
-    { name = "API_BASE_URL",      value = "https://k4avvm6daf.execute-api.us-east-1.amazonaws.com/prod" },
+    { name = "API_BASE_URL",      value = "https://788nqj8wtg.execute-api.us-east-1.amazonaws.com/prod" },
   ]
 
   depends_on = [module.bedrock_privatelink]
@@ -144,7 +144,7 @@ module "hitl_notifier" {
 # ------------------------------------------------------------
 resource "aws_iam_role_policy" "mcp_server" {
   name = "${var.project_name}-mcp-server-policy"
-  role = "${var.project_name}-ecs-task"
+  role = split("/", module.ecs_fargate.task_role_arn)[1]
 
   policy = jsonencode({
     Version = "2012-10-17"

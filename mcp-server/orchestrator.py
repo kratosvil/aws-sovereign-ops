@@ -115,8 +115,11 @@ class Orchestrator:
                     f"Alarm: {event.alarm_name}\n"
                     f"State: {event.alarm_state}\n"
                     f"Reason: {event.reason}\n"
-                    f"Timestamp: {event.timestamp}\n\n"
-                    "Investigate this incident and propose a fix."
+                    f"Timestamp: {event.timestamp}\n"
+                    + (f"Resource name: {event.resource_name}\n" if event.resource_name else "")
+                    + (f"Resource type: {event.resource_type}\n" if event.resource_type != "generic" else "")
+                    + "\nInvestigate this incident and propose a fix. "
+                    "Use the exact resource_name provided above when calling tools or generating AWS CLI commands."
                 )}],
             }
         ]

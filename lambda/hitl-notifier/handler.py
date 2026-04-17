@@ -52,14 +52,37 @@ def lambda_handler(event, context):
 # Handlers
 # ------------------------------------------------------------------
 
+def _extract_resource(dimensions: dict) -> tuple:
+    """Derives resource_name and resource_type from CloudWatch alarm metric dimensions."""
+    if not dimensions or not isinstance(dimensions, dict):
+        return "", "generic"
+    if "FunctionName" in dimensions:
+        return dimensions["FunctionName"], "lambda"
+    if "ServiceName" in dimensions and "ClusterName" in dimensions:
+        return dimensions["ServiceName"], "ecs_service"
+    if "DBInstanceIdentifier" in dimensions:
+        return dimensions["DBInstanceIdentifier"], "rds"
+    if "LoadBalancer" in dimensions:
+        return dimensions["LoadBalancer"], "alb"
+    return next(iter(dimensions.values()), ""), "generic"
+
+
 def _forward_alarm_transformed(event: dict) -> dict:
     """Handles EventBridge event already flattened by input_transformer in cloudwatch-alarms module."""
+    dimensions = event.get("dimensions") or {}
+    resource_name, resource_type = _extract_resource(dimensions)
+    # explicit fields in event take precedence over derived values
+    resource_name = event.get("resource_name") or resource_name
+    resource_type = event.get("resource_type") or resource_type
+
     payload = {
-        "alarm_name":  event.get("alarm_name", "unknown"),
-        "alarm_state": event.get("alarm_state", "ALARM"),
-        "reason":      event.get("reason", ""),
-        "timestamp":   event.get("timestamp", ""),
-        "project":     event.get("project", os.environ.get("PROJECT_NAME", "sovereign-aiops")),
+        "alarm_name":   event.get("alarm_name", "unknown"),
+        "alarm_state":  event.get("alarm_state", "ALARM"),
+        "reason":       event.get("reason", ""),
+        "timestamp":    event.get("timestamp", ""),
+        "project":      event.get("project", os.environ.get("PROJECT_NAME", "sovereign-aiops")),
+        "resource_name": resource_name,
+        "resource_type": resource_type,
     }
     logger.info("forwarding_alarm alarm=%s state=%s", payload["alarm_name"], payload["alarm_state"])
     result = _call_mcp("POST", "/alarm", payload)
@@ -71,11 +94,13 @@ def _forward_alarm_raw(event: dict) -> dict:
     """Fallback: raw EventBridge CloudWatch Alarm State Change (no input_transformer)."""
     detail = event.get("detail", {})
     payload = {
-        "alarm_name":  detail.get("alarmName", "unknown"),
-        "alarm_state": detail.get("state", {}).get("value", "ALARM"),
-        "reason":      detail.get("state", {}).get("reason", ""),
-        "timestamp":   event.get("time", ""),
-        "project":     os.environ.get("PROJECT_NAME", "sovereign-aiops"),
+        "alarm_name":   detail.get("alarmName", "unknown"),
+        "alarm_state":  detail.get("state", {}).get("value", "ALARM"),
+        "reason":       detail.get("state", {}).get("reason", ""),
+        "timestamp":    event.get("time", ""),
+        "project":      os.environ.get("PROJECT_NAME", "sovereign-aiops"),
+        "resource_name": detail.get("resource_name", ""),
+        "resource_type": detail.get("resource_type", "generic"),
     }
     logger.info("forwarding_alarm alarm=%s state=%s", payload["alarm_name"], payload["alarm_state"])
     result = _call_mcp("POST", "/alarm", payload)
