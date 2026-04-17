@@ -32,6 +32,15 @@ SCHEMA = {
                     "description": "Same resource_type used in analyze_incident.",
                     "default": "generic",
                 },
+                "triggering_alarm": {
+                    "type": "string",
+                    "description": (
+                        "Name of the CloudWatch alarm that triggered this incident. "
+                        "It is excluded from the active-alarms check because CloudWatch alarms "
+                        "take several minutes to transition back to OK after a fix is applied."
+                    ),
+                    "default": "",
+                },
                 "lookback_minutes": {
                     "type": "integer",
                     "description": "How many minutes of post-fix data to check.",
@@ -67,13 +76,14 @@ class ValidateFixTool:
         incident_id: str,
         resource_name: str,
         resource_type: str = "generic",
+        triggering_alarm: str = "",
         lookback_minutes: int = 10,
     ) -> dict:
         end = datetime.now(timezone.utc)
         start = end - timedelta(minutes=lookback_minutes)
 
         metrics = self._get_health_metric(resource_name, resource_type, start, end)
-        active_alarms = self._get_active_alarms()
+        active_alarms = self._get_active_alarms(exclude_alarm=triggering_alarm)
 
         fix_confirmed, reason = self._assess(resource_type, metrics, active_alarms)
 
@@ -131,7 +141,7 @@ class ValidateFixTool:
             logger.warning("health_metric_failed resource=%s error=%s", resource_name, exc)
             return {"error": str(exc)}
 
-    def _get_active_alarms(self) -> list:
+    def _get_active_alarms(self, exclude_alarm: str = "") -> list:
         try:
             resp = self.cw.describe_alarms(
                 AlarmNamePrefix=self.project,
@@ -140,6 +150,7 @@ class ValidateFixTool:
             return [
                 {"name": a["AlarmName"], "reason": a["StateReason"]}
                 for a in resp.get("MetricAlarms", [])
+                if a["AlarmName"] != exclude_alarm
             ]
         except Exception as exc:
             logger.warning("active_alarms_check_failed error=%s", exc)

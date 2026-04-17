@@ -10,6 +10,7 @@ Circuit breaker: 2 consecutive tool failures → suspend and escalate.
 """
 
 import logging
+import time
 import uuid
 from typing import Optional
 
@@ -58,6 +59,7 @@ SYSTEM_PROMPT = _build_system_prompt()
 
 MAX_LOOP_ITERATIONS = 10
 CIRCUIT_BREAKER_THRESHOLD = 2
+AGENTIC_LOOP_MAX_SECONDS = 300  # 5-minute wall-clock timeout per phase
 
 
 class Orchestrator:
@@ -159,17 +161,22 @@ class Orchestrator:
         actions_json = _json.dumps(proposal.get("actions", []))
         logger.info("execution_phase_start incident_id=%s actions=%s", incident_id, actions_json)
 
+        alarm_name = event.alarm_name
         messages = [
             {
                 "role": "user",
                 "content": [{"text": (
                     f"Incident ID: {incident_id}\n"
+                    f"Triggering alarm: {alarm_name}\n"
                     f"The operator has approved the fix. Approval token: {approval['token']}\n"
                     f"Approved by: {approval.get('approved_by', 'unknown')}\n\n"
                     f"Execute the approved fix actions listed below.\n"
                     f"Actions (JSON): {actions_json}\n\n"
-                    "Call execute_approved with the incident_id, token, and the full actions list. "
-                    "After executing, call validate_fix to confirm the fix worked. "
+                    f"Call execute_approved with the incident_id, token, and the full actions list. "
+                    f"After executing, call validate_fix to confirm the fix worked. "
+                    f"Pass triggering_alarm='{alarm_name}' to validate_fix so it excludes the "
+                    "triggering alarm from the active-alarms check (it takes several minutes to "
+                    "transition back to OK after a fix is applied). "
                     "If validation fails, call rollback with the appropriate undo_actions."
                 )}],
             }
@@ -194,8 +201,19 @@ class Orchestrator:
     ) -> dict:
         consecutive_failures = 0
         actions = []
+        loop_start = time.time()
 
         for iteration in range(MAX_LOOP_ITERATIONS):
+            elapsed = time.time() - loop_start
+            if elapsed > AGENTIC_LOOP_MAX_SECONDS:
+                logger.error(
+                    "agentic_loop_timeout incident_id=%s iteration=%d elapsed=%.1fs",
+                    incident_id, iteration, elapsed,
+                )
+                return {
+                    "final_text": f"Loop timeout after {elapsed:.0f}s — escalating to human.",
+                    "actions": actions,
+                }
             response = self.bedrock.converse(messages, SYSTEM_PROMPT, schemas)
             stop_reason = response["stopReason"]
 

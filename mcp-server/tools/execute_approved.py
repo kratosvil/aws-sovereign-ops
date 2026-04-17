@@ -217,14 +217,31 @@ class ExecuteApprovedTool:
             concurrency = params.get("reserved-concurrent-executions")
             if not concurrency:
                 return {"success": False, "stderr": "missing --reserved-concurrent-executions"}
-            resp = client.put_function_concurrency(
-                FunctionName=fn,
-                ReservedConcurrentExecutions=int(concurrency),
-            )
-            return {
-                "success": True,
-                "stdout": f"Lambda {fn} concurrency set to {resp.get('ReservedConcurrentExecutions')}",
-            }
+            try:
+                resp = client.put_function_concurrency(
+                    FunctionName=fn,
+                    ReservedConcurrentExecutions=int(concurrency),
+                )
+                return {
+                    "success": True,
+                    "stdout": f"Lambda {fn} concurrency set to {resp.get('ReservedConcurrentExecutions')}",
+                }
+            except client.exceptions.InvalidParameterValueException as exc:
+                if "UnreservedConcurrentExecution" in str(exc):
+                    # Account concurrency pool too small to reserve — remove limit instead
+                    logger.warning(
+                        "put_concurrency_fallback fn=%s requested=%s reason=account_pool_too_small",
+                        fn, concurrency,
+                    )
+                    client.delete_function_concurrency(FunctionName=fn)
+                    return {
+                        "success": True,
+                        "stdout": (
+                            f"Lambda {fn}: could not reserve {concurrency} (account pool too small). "
+                            "Removed concurrency limit instead — function now uses unreserved pool."
+                        ),
+                    }
+                raise
 
         if subcommand == "delete-function-concurrency":
             fn = params.get("function-name")
