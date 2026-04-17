@@ -32,4 +32,14 @@ mcp-install:
 	cd mcp-server && pip3 install -r requirements.txt
 
 mcp-run:
-	cd mcp-server && python3 server.py
+	cd mcp-server && \
+	AWS_REGION=us-east-1 \
+	BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0 \
+	HITL_SNS_TOPIC=arn:aws:sns:us-east-1:805778285334:sovereign-aiops-alarms \
+	HITL_TOKEN_SECRET=sovereign-aiops-demo-secret \
+	PROJECT_NAME=sovereign-aiops \
+	AWS_ACCOUNT_ID=805778285334 \
+	python3 server.py
+
+run_script:
+	@bash _script.sh

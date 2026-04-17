@@ -1,6 +1,7 @@
 import os
 import boto3
 import logging
+from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -11,9 +12,13 @@ EXECUTION_TOOLS = ["execute_approved", "validate_fix", "rollback"]
 
 class BedrockService:
     def __init__(self):
-        self.client = boto3.client("bedrock-runtime", region_name=os.environ["AWS_REGION"])
+        self.client = boto3.client(
+            "bedrock-runtime",
+            region_name=os.environ["AWS_REGION"],
+            config=Config(read_timeout=120, connect_timeout=10, retries={"max_attempts": 2}),
+        )
         self.model_id = os.environ.get(
-            "BEDROCK_MODEL_ID", "anthropic.claude-haiku-4-5-20251001-v1:0"
+            "BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
         )
 
     def converse(self, messages: list, system: str, tools: list) -> dict:
@@ -21,13 +26,14 @@ class BedrockService:
         Calls Bedrock converse API with tool support.
         Returns the full response dict from boto3.
         """
+        logger.info("bedrock_converse model=%s tools=%s msgs=%d", self.model_id, [t["name"] for t in tools], len(messages))
         response = self.client.converse(
             modelId=self.model_id,
             system=[{"text": system}],
             messages=messages,
             toolConfig={"tools": [{"toolSpec": t} for t in tools]},
         )
-        logger.debug(
+        logger.info(
             "bedrock_response stop_reason=%s usage=%s",
             response["stopReason"],
             response.get("usage"),

@@ -110,10 +110,19 @@ resource "aws_lambda_function" "hitl_notifier" {
     variables = {
       MCP_SERVER_URL = var.mcp_server_url
       API_BASE_URL   = "https://${aws_api_gateway_rest_api.hitl.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/prod"
+      PROJECT_NAME   = var.project_name
     }
   }
 
   tags = var.tags
+}
+
+# Allow EventBridge to invoke Lambda (routes CloudWatch Alarm State Change events)
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.hitl_notifier.function_name
+  principal     = "events.amazonaws.com"
 }
 
 # Allow SNS to invoke Lambda (future extension — SNS trigger on Lambda directly)

@@ -27,12 +27,6 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "private_subnet_cidrs" {
-  description = "CIDR blocks for private subnets (one per AZ)."
-  type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
-}
-
 variable "cloudtrail_retention_days" {
   description = "Object Lock retention period in days. CloudTrail logs cannot be deleted during this period."
   type        = number
@@ -55,4 +49,10 @@ variable "mcp_server_memory" {
   description = "ECS Fargate memory in MB for the MCP Server task."
   type        = number
   default     = 512
+}
+
+variable "hitl_token_secret" {
+  description = "Secret key used to sign and verify HITL approval tokens (HMAC-SHA256). Keep this value private."
+  type        = string
+  sensitive   = true
 }

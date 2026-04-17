@@ -77,7 +77,7 @@ METRIC_QUERIES = {
         ("concurrent", "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "Maximum"),
     ],
     "alb": [
-        ("5xx", "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "Sum"),
+        ("http5xx", "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "Sum"),
         ("latency_p99", "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "p99"),
         ("request_count", "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "Sum"),
         ("healthy_hosts", "AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", "Minimum"),

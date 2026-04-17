@@ -80,16 +80,22 @@ class Orchestrator:
             "rollback": ROLLBACK_SCHEMA,
         }
 
-    def handle_alarm(self, event: AlarmEvent, approval: Optional[dict] = None) -> dict:
+    def handle_alarm(
+        self,
+        event: AlarmEvent,
+        approval: Optional[dict] = None,
+        proposal: Optional[dict] = None,
+    ) -> dict:
         """
         Main entrypoint. Call with just the alarm event to run the investigation phase.
-        Call again with approval={incident_id, token, approved_by} to run the execution phase.
+        Call again with approval={incident_id, token, approved_by} and proposal to run
+        the execution phase. Passing proposal avoids relying on the module-level global.
         """
         incident_id = approval["incident_id"] if approval else str(uuid.uuid4())[:8]
         self.audit.incident_received(incident_id, event.alarm_name)
 
         if approval:
-            return self._run_execution_phase(incident_id, event, approval)
+            return self._run_execution_phase(incident_id, event, approval, proposal)
         return self._run_investigation_phase(incident_id, event)
 
     # ------------------------------------------------------------------
@@ -137,12 +143,21 @@ class Orchestrator:
     # Phase 2: Execution (called after operator approves)
     # ------------------------------------------------------------------
 
-    def _run_execution_phase(self, incident_id: str, event: AlarmEvent, approval: dict) -> dict:
+    def _run_execution_phase(
+        self, incident_id: str, event: AlarmEvent, approval: dict, proposal: Optional[dict] = None
+    ) -> dict:
         self.audit.approval_received(incident_id, approval.get("approved_by", "unknown"))
 
-        proposal = get_current_proposal()
+        # Prefer proposal passed explicitly; fall back to module-level global
         if not proposal:
+            proposal = get_current_proposal()
+        if not proposal:
+            logger.error("execution_no_proposal incident_id=%s", incident_id)
             return {"status": "error", "reason": "No proposal found for this incident."}
+
+        import json as _json
+        actions_json = _json.dumps(proposal.get("actions", []))
+        logger.info("execution_phase_start incident_id=%s actions=%s", incident_id, actions_json)
 
         messages = [
             {
@@ -151,9 +166,9 @@ class Orchestrator:
                     f"Incident ID: {incident_id}\n"
                     f"The operator has approved the fix. Approval token: {approval['token']}\n"
                     f"Approved by: {approval.get('approved_by', 'unknown')}\n\n"
-                    f"Execute the approved fix:\n"
-                    f"- actions: {proposal.get('actions', [])}\n\n"
-                    "Call execute_approved with the actions list and the token. "
+                    f"Execute the approved fix actions listed below.\n"
+                    f"Actions (JSON): {actions_json}\n\n"
+                    "Call execute_approved with the incident_id, token, and the full actions list. "
                     "After executing, call validate_fix to confirm the fix worked. "
                     "If validation fails, call rollback with the appropriate undo_actions."
                 )}],

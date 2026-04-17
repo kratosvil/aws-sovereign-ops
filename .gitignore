@@ -36,3 +36,6 @@ terraform.tfvars
 # IDE
 .vscode/
 .idea/
+
+# Runner temporal
+_script.sh

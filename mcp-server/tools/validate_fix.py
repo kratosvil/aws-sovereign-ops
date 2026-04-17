@@ -51,7 +51,7 @@ HEALTH_CHECK_METRIC = {
     "ecs_service": ("cpu_util", "AWS/ECS", "CPUUtilization", "ServiceName", "Average", 85),
     "rds": ("cpu_util", "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "Average", 85),
     "lambda": ("errors", "AWS/Lambda", "Errors", "FunctionName", "Sum", 1),
-    "alb": ("5xx", "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "Sum", 5),
+    "alb": ("http5xx", "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "Sum", 5),
     "generic": None,
 }
 

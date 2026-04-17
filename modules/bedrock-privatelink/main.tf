@@ -111,6 +111,62 @@ resource "aws_vpc_endpoint" "cloudwatch_logs" {
 }
 
 # ---------------------------------------------------------------------------
+# ECR API — authentication token for image pulls (GetAuthorizationToken)
+# ---------------------------------------------------------------------------
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = var.subnet_ids
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.tags, { Name = "${var.project_name}-ecr-api" })
+}
+
+# ---------------------------------------------------------------------------
+# ECR DKR — Docker image layer pull
+# ---------------------------------------------------------------------------
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = var.subnet_ids
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.tags, { Name = "${var.project_name}-ecr-dkr" })
+}
+
+# ---------------------------------------------------------------------------
+# SNS — publish HITL notification emails to operator
+# ---------------------------------------------------------------------------
+resource "aws_vpc_endpoint" "sns" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.sns"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = var.subnet_ids
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.tags, { Name = "${var.project_name}-sns" })
+}
+
+# ---------------------------------------------------------------------------
+# Lambda — execute_approved calls lambda:UpdateFunctionConfiguration etc.
+# ---------------------------------------------------------------------------
+resource "aws_vpc_endpoint" "lambda" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.lambda"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = var.subnet_ids
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.tags, { Name = "${var.project_name}-lambda" })
+}
+
+# ---------------------------------------------------------------------------
 # STS — IAM role assumption without internet
 # ---------------------------------------------------------------------------
 resource "aws_vpc_endpoint" "sts" {

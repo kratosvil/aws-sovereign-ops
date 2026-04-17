@@ -13,26 +13,20 @@ locals {
     var.tags
   )
 
-  enable_alb_alarms = var.alb_arn_suffix != ""
-  enable_eks_alarms = var.eks_cluster_name != ""
-  enable_ecs_alarms = var.ecs_cluster_name != "" && var.ecs_service_name != ""
-  enable_eb_target  = var.mcp_server_lambda_arn != ""
+  enable_alb_alarms = var.enable_alb_alarms
+  enable_eks_alarms = var.enable_eks_alarms
+  enable_ecs_alarms = var.enable_ecs_alarms
 }
 
 # --------------------------------------------------------------
-# SNS TOPIC — central notification channel for all alarms
+# SNS SUBSCRIPTION — email alert when alarm fires
+# SNS topic is created outside this module (see examples/main.tf)
+# to avoid circular dependencies.
 # --------------------------------------------------------------
-resource "aws_sns_topic" "alarms" {
-  name              = "${var.project_name}-alarms"
-  kms_master_key_id = "alias/aws/sns"
-
-  tags = merge(local.tags, { Name = "${var.project_name}-alarms" })
-}
-
 resource "aws_sns_topic_subscription" "email" {
   count = var.alarm_email != "" ? 1 : 0
 
-  topic_arn = aws_sns_topic.alarms.arn
+  topic_arn = var.sns_topic_arn
   protocol  = "email"
   endpoint  = var.alarm_email
 }
@@ -59,8 +53,8 @@ resource "aws_cloudwatch_metric_alarm" "oomkilled" {
     ClusterName = var.eks_cluster_name
   }
 
-  alarm_actions = [aws_sns_topic.alarms.arn]
-  ok_actions    = [aws_sns_topic.alarms.arn]
+  alarm_actions = [var.sns_topic_arn]
+  ok_actions    = [var.sns_topic_arn]
 
   tags = merge(local.tags, { AlarmType = "oomkilled" })
 }
@@ -86,8 +80,8 @@ resource "aws_cloudwatch_metric_alarm" "high_latency" {
     LoadBalancer = var.alb_arn_suffix
   }
 
-  alarm_actions = [aws_sns_topic.alarms.arn]
-  ok_actions    = [aws_sns_topic.alarms.arn]
+  alarm_actions = [var.sns_topic_arn]
+  ok_actions    = [var.sns_topic_arn]
 
   tags = merge(local.tags, { AlarmType = "latency" })
 }
@@ -138,8 +132,8 @@ resource "aws_cloudwatch_metric_alarm" "error_rate_5xx" {
     }
   }
 
-  alarm_actions = [aws_sns_topic.alarms.arn]
-  ok_actions    = [aws_sns_topic.alarms.arn]
+  alarm_actions = [var.sns_topic_arn]
+  ok_actions    = [var.sns_topic_arn]
 
   tags = merge(local.tags, { AlarmType = "error-rate" })
 }
@@ -166,8 +160,8 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu" {
     ServiceName = var.ecs_service_name
   }
 
-  alarm_actions = [aws_sns_topic.alarms.arn]
-  ok_actions    = [aws_sns_topic.alarms.arn]
+  alarm_actions = [var.sns_topic_arn]
+  ok_actions    = [var.sns_topic_arn]
 
   tags = merge(local.tags, { AlarmType = "ecs-cpu" })
 }
@@ -196,8 +190,6 @@ resource "aws_cloudwatch_event_rule" "alarm_trigger" {
 }
 
 resource "aws_cloudwatch_event_target" "mcp_server" {
-  count = local.enable_eb_target ? 1 : 0
-
   rule      = aws_cloudwatch_event_rule.alarm_trigger.name
   target_id = "mcp-server"
   arn       = var.mcp_server_lambda_arn

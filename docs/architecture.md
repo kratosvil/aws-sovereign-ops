@@ -189,17 +189,20 @@ Prevents runaway automation in degraded environments.
 
 ## Running the demo
 
+### Local demo (no AWS infra required)
+
 ```bash
 # 1. Install MCP Server dependencies
 make mcp-install
 
 # 2. Set required environment variables
 export AWS_REGION=us-east-1
-export BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
-export HITL_SNS_TOPIC=arn:aws:sns:us-east-1:123456789:sovereign-aiops-alarms
-export HITL_TOKEN_SECRET=your-secret-key
-export API_BASE_URL=https://your-api-gw-id.execute-api.us-east-1.amazonaws.com/prod
+export BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
+export HITL_SNS_TOPIC=arn:aws:sns:us-east-1:805778285334:sovereign-aiops-alarms
+export HITL_TOKEN_SECRET=sovereign-aiops-demo-secret
+export API_BASE_URL=http://localhost:8080
 export PROJECT_NAME=sovereign-aiops
+export AWS_ACCOUNT_ID=805778285334
 
 # 3. Start MCP Server
 make mcp-run
@@ -210,6 +213,22 @@ bash scripts/demo.sh oomkilled    # EKS pod OOMKilled
 bash scripts/demo.sh rds-cpu      # RDS CPU overload
 bash scripts/demo.sh lambda-error # Lambda high error rate
 bash scripts/demo.sh alb-latency  # ALB p99 latency breach
+```
+
+### Production (AWS infra deployed)
+
+```bash
+# HITL API endpoint
+https://k4avvm6daf.execute-api.us-east-1.amazonaws.com/prod
+
+# Approve an incident (operator flow)
+curl -X POST https://k4avvm6daf.execute-api.us-east-1.amazonaws.com/prod/approve \
+  -H "Content-Type: application/json" \
+  -d '{"incident_id": "INCIDENT_ID", "token": "TOKEN", "approved_by": "operator-name"}'
+
+# IMPORTANT: BEDROCK_MODEL_ID must use cross-region inference prefix
+# Correct:   us.anthropic.claude-haiku-4-5-20251001-v1:0
+# Incorrect: anthropic.claude-haiku-4-5-20251001-v1:0  ← ValidationException
 ```
 
 ---

@@ -8,10 +8,12 @@ Endpoints:
   GET  /health   — health check for ECS load balancer
 """
 
+import asyncio
 import json
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -33,6 +35,7 @@ app = FastAPI(title="sovereign-aiops MCP Server", docs_url=None, redoc_url=None)
 
 orchestrator = Orchestrator()
 audit = AuditService()
+_executor = ThreadPoolExecutor(max_workers=4)
 
 # In-memory store for pending approvals (incident_id → proposal).
 # In production, replace with DynamoDB or ElastiCache.
@@ -48,28 +51,41 @@ def health():
 async def receive_alarm(request: Request):
     """
     Triggered by EventBridge when a CloudWatch Alarm fires.
-    Starts the investigation phase and sends the fix proposal to the operator.
+    Returns 202 immediately and processes the investigation in background.
+    The operator receives an email with the APPROVE/REJECT link when done.
     """
     body = await request.json()
     logger.info("alarm_received detail_type=%s", body.get("detail-type"))
 
     event = _parse_alarm_event(body)
 
-    result = orchestrator.handle_alarm(event)
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(_executor, _process_alarm, event)
 
-    if result.get("status") == "awaiting_approval":
-        _pending[result["incident_id"]] = {
-            "event": event,
-            "proposal": result["proposal"],
-        }
+    return JSONResponse(
+        content={"status": "accepted", "incident_id": event.alarm_name},
+        status_code=202,
+    )
 
-    return JSONResponse(content=result, status_code=200)
+
+def _process_alarm(event: AlarmEvent):
+    """Runs investigation phase in a background thread."""
+    try:
+        result = orchestrator.handle_alarm(event)
+        if result.get("status") == "awaiting_approval":
+            _pending[result["incident_id"]] = {
+                "event": event,
+                "proposal": result["proposal"],
+            }
+    except Exception as exc:
+        logger.error("alarm_processing_error alarm=%s error=%s", event.alarm_name, exc)
 
 
 @app.post("/approve")
 async def approve(request: Request):
     """
     Called when the operator approves the fix.
+    Returns 202 immediately and runs execution in background (Bedrock takes >30s).
     Body: {"incident_id": "...", "token": "...", "approved_by": "..."}
     """
     body = await request.json()
@@ -84,15 +100,32 @@ async def approve(request: Request):
     if not pending:
         raise HTTPException(status_code=404, detail=f"No pending incident: {incident_id}")
 
-    result = orchestrator.handle_alarm(
-        pending["event"],
-        approval={"incident_id": incident_id, "token": token, "approved_by": approved_by},
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        _executor,
+        _process_approval,
+        incident_id, token, approved_by, pending,
     )
 
-    if result.get("status") == "execution_complete":
-        _pending.pop(incident_id, None)
+    return JSONResponse(
+        content={"status": "accepted", "incident_id": incident_id, "message": "Execution started"},
+        status_code=202,
+    )
 
-    return JSONResponse(content=result, status_code=200)
+
+def _process_approval(incident_id: str, token: str, approved_by: str, pending: dict):
+    """Runs execution phase in a background thread."""
+    try:
+        result = orchestrator.handle_alarm(
+            pending["event"],
+            approval={"incident_id": incident_id, "token": token, "approved_by": approved_by},
+            proposal=pending.get("proposal"),
+        )
+        if result.get("status") in ("execution_complete", "error"):
+            _pending.pop(incident_id, None)
+        logger.info("approval_processing_done incident_id=%s status=%s", incident_id, result.get("status"))
+    except Exception as exc:
+        logger.error("approval_processing_error incident_id=%s error=%s", incident_id, exc)
 
 
 @app.post("/reject")

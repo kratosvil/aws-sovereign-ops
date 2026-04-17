@@ -24,6 +24,16 @@ MCP_SERVER_URL = os.environ["MCP_SERVER_URL"]   # internal ALB URL — no public
 
 
 def lambda_handler(event, context):
+    # EventBridge event transformed by cloudwatch-alarms input_transformer:
+    # { event_type, alarm_name, alarm_state, reason, timestamp, project }
+    if event.get("event_type") == "alarm":
+        return _forward_alarm_transformed(event)
+
+    # Raw EventBridge event (no transformer) — fallback
+    if event.get("source") == "aws.cloudwatch":
+        return _forward_alarm_raw(event)
+
+    # API Gateway events — APPROVE / REJECT from operator
     path   = event.get("path") or event.get("rawPath", "")
     params = event.get("queryStringParameters") or {}
 
@@ -41,6 +51,37 @@ def lambda_handler(event, context):
 # ------------------------------------------------------------------
 # Handlers
 # ------------------------------------------------------------------
+
+def _forward_alarm_transformed(event: dict) -> dict:
+    """Handles EventBridge event already flattened by input_transformer in cloudwatch-alarms module."""
+    payload = {
+        "alarm_name":  event.get("alarm_name", "unknown"),
+        "alarm_state": event.get("alarm_state", "ALARM"),
+        "reason":      event.get("reason", ""),
+        "timestamp":   event.get("timestamp", ""),
+        "project":     event.get("project", os.environ.get("PROJECT_NAME", "sovereign-aiops")),
+    }
+    logger.info("forwarding_alarm alarm=%s state=%s", payload["alarm_name"], payload["alarm_state"])
+    result = _call_mcp("POST", "/alarm", payload)
+    logger.info("alarm_forwarded result=%s", result)
+    return {"statusCode": 200, "body": "forwarded"}
+
+
+def _forward_alarm_raw(event: dict) -> dict:
+    """Fallback: raw EventBridge CloudWatch Alarm State Change (no input_transformer)."""
+    detail = event.get("detail", {})
+    payload = {
+        "alarm_name":  detail.get("alarmName", "unknown"),
+        "alarm_state": detail.get("state", {}).get("value", "ALARM"),
+        "reason":      detail.get("state", {}).get("reason", ""),
+        "timestamp":   event.get("time", ""),
+        "project":     os.environ.get("PROJECT_NAME", "sovereign-aiops"),
+    }
+    logger.info("forwarding_alarm alarm=%s state=%s", payload["alarm_name"], payload["alarm_state"])
+    result = _call_mcp("POST", "/alarm", payload)
+    logger.info("alarm_forwarded result=%s", result)
+    return {"statusCode": 200, "body": "forwarded"}
+
 
 def _approve(params: dict) -> dict:
     incident_id = params.get("incident_id", "").strip()
@@ -65,7 +106,11 @@ def _approve(params: dict) -> dict:
         return _page(403, "Token rejected", "The approval token is invalid or expired. Request a new approval.")
 
     logger.info("approved incident_id=%s approved_by=%s", incident_id, approved_by)
-    return _page(200, "Approved", f"Fix approved for incident <strong>{incident_id}</strong>. Execution started.")
+    # MCP Server returns 202 — execution runs in background
+    return _page(200, "Approved", (
+        f"Fix approved for incident <strong>{incident_id}</strong>. "
+        "Execution started in background — check CloudWatch Logs for results."
+    ))
 
 
 def _reject(params: dict) -> dict:

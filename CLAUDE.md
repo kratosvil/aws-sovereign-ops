@@ -73,12 +73,14 @@ mcp-server/tools/analyze_incident.py. No other files need to change.
 
 Always compose in this order:
 1. networking (from tf-modules-forge)
-2. iam-base (from tf-modules-forge)
-3. ecr (from tf-modules-forge)
-4. bedrock-privatelink (this repo)
-5. cloudtrail-audit (this repo)
-6. cloudwatch-alarms (this repo)
-7. ecs-fargate (from tf-modules-forge) — deploys MCP Server
+2. ecr (from tf-modules-forge)
+3. bedrock-privatelink (this repo)
+4. cloudtrail-audit (this repo)
+5. ecs-fargate (from tf-modules-forge) — deploys MCP Server, manages its own IAM roles
+6. hitl-notifier (this repo — lambda/)
+7. cloudwatch-alarms (this repo) — requires sns_topic_arn and mcp_server_lambda_arn
+
+Note: iam-base is NOT used. ecs-fargate creates task + execution IAM roles internally.
 
 ## Repository structure
 
@@ -134,8 +136,34 @@ Reference via: source = "github.com/kratosvil/tf-modules-forge//modules/X"
 | modules/bedrock-privatelink | Done |
 | modules/cloudtrail-audit | Done |
 | modules/cloudwatch-alarms | Done |
-| examples/sovereign-aiops | Done |
-| mcp-server/ | Done |
-| lambda/hitl-notifier | Done |
-| scripts/demo.sh | Done |
+| examples/sovereign-aiops | Done — deployed to AWS 2026-04-16 |
+| mcp-server/ | Done — image in ECR |
+| lambda/hitl-notifier | Done — deployed to AWS |
+| scripts/demo.sh | Done — 4/4 local tests passed |
 | docs/architecture.md | Done |
+
+## Live AWS resources (us-east-1, account 805778285334)
+
+| Resource | Value |
+|----------|-------|
+| ECS Cluster | sovereign-aiops-cluster |
+| ECS Service | sovereign-aiops-service |
+| ECR | 805778285334.dkr.ecr.us-east-1.amazonaws.com/sovereign-aiops-mcp-server |
+| HITL API | https://k4avvm6daf.execute-api.us-east-1.amazonaws.com/prod |
+| SNS Topic | arn:aws:sns:us-east-1:805778285334:sovereign-aiops-alarms |
+| CloudTrail S3 | sovereign-aiops-cloudtrail-805778285334 |
+| VPC | vpc-0b1179b10818ba7e3 |
+
+## cloudwatch-alarms module — important inputs
+
+- `sns_topic_arn` — required. Create the SNS topic outside the module and pass the ARN.
+- `mcp_server_lambda_arn` — required. EventBridge target always created (no count).
+- `enable_alb_alarms`, `enable_ecs_alarms`, `enable_eks_alarms` — explicit booleans required
+  for count to be static-at-plan-time. Do NOT derive from module outputs.
+
+## Known Terraform issues resolved
+
+- IAM duplicate tags: provider `default_tags` must NOT include keys that modules also set
+  (e.g. `Project`, `ManagedBy`). Keep only keys that modules don't add (e.g. `environment`).
+- CloudTrail KMS key must include `logs.<region>.amazonaws.com` in its key policy for
+  CloudWatch Log Groups to use it.
